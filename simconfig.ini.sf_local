@@ -1,0 +1,9 @@
+[log]
+  dir=/home/junjies/workspace/simulation_scenarios/sf_local/simulation_build/data
+
+[scenario]
+  map=sf_local
+  vehicle=Jaguar XE 2015 2001 sf_local
+  velocity_x=-20.0
+  velocity_y=0.0
+  velocity_z=0.0

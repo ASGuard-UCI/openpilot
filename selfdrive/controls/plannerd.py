@@ -10,6 +10,8 @@ from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.controls.lib.pathplanner import PathPlanner
 import selfdrive.messaging as messaging
 
+from selfdrive.car.car_helpers import interfaces
+
 
 def plannerd_thread(sm=None, pm=None):
   gc.disable()
@@ -18,7 +20,12 @@ def plannerd_thread(sm=None, pm=None):
   set_realtime_priority(2)
 
   cloudlog.info("plannerd is waiting for CarParams")
-  CP = car.CarParams.from_bytes(Params().get("CarParams", block=True))
+
+  # CP = car.CarParams.from_bytes(Params().get("CarParams", block=True))
+  CarInterface, CarController = interfaces['mock']
+  # CP = CarInterface.get_params('TOYOTA RAV4 HYBRID 2017', None)
+  CP = CarInterface.get_params('mock', None)
+
   cloudlog.info("plannerd got CarParams: %s", CP.carName)
 
   PL = Planner(CP)

@@ -63,8 +63,8 @@ else
               -lSNPE -lsymphony-cpu \
               -Wl,-rpath $(PHONELIBS)/snpe/x86_64-linux-clang/
 
-  CFLAGS += -g
-  CXXFLAGS += -g -I../common
+  CFLAGS += -g -O0
+  CXXFLAGS += -g -O0 -I../common
 
   PLATFORM_OBJS = cameras/camera_frame_stream.o \
                   ../common/visionbuf_cl.o \
@@ -175,6 +175,7 @@ $(OUTPUT): $(OBJS) $(MESSAGING_LIBS)
         -ljpeg \
         -L/usr/lib \
         -L/system/vendor/lib64 \
+        -L/usr/local/cuda/lib64 \
         $(OPENCL_LIBS) \
         $(CURL_LIBS) \
         $(SSL_LIBS) \

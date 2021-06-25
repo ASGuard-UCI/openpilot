@@ -42,6 +42,7 @@ demo: messaging.a demo.o
 	$(CC) $(LDFLAGS) $^ $(LDLIBS) -L. -l:messaging.a -o '$@'
 
 messaging_pyx.so: messaging.a messaging_pyx_setup.py messaging_pyx.pyx messaging.pxd
+	PYTHONPATH=/home/$(USER)/openpilot_0.6.6
 	python3 messaging_pyx_setup.py build_ext --inplace
 	rm -rf build
 	rm -f messaging_pyx.cpp

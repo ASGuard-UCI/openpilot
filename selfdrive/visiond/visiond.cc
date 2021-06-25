@@ -30,6 +30,7 @@
 #include <eigen3/Eigen/Dense>
 #else
 #include <Eigen/Dense>
+// #include <eigen3/Eigen/Dense>
 #endif
 
 #include "common/version.h"
@@ -400,484 +401,484 @@ void free_buffers(VisionState *s) {
   }
 }
 
-void* visionserver_client_thread(void* arg) {
-  int err;
-  VisionClientState *client = (VisionClientState*)arg;
-  VisionState *s = client->s;
-  int fd = client->fd;
-
-  set_thread_name("clientthread");
-
-  zsock_t *terminate = zsock_new_sub(">inproc://terminate", "");
-  assert(terminate);
-  void* terminate_raw = zsock_resolve(terminate);
-
-  VisionClientStreamState streams[VISION_STREAM_MAX] = {{0}};
-
-  LOG("client start fd %d\n", fd);
-
-  while (true) {
-    zmq_pollitem_t polls[2+VISION_STREAM_MAX] = {{0}};
-    polls[0].socket = terminate_raw;
-    polls[0].events = ZMQ_POLLIN;
-    polls[1].fd = fd;
-    polls[1].events = ZMQ_POLLIN;
-
-    int poll_to_stream[2+VISION_STREAM_MAX] = {0};
-    int num_polls = 2;
-    for (int i=0; i<VISION_STREAM_MAX; i++) {
-      if (!streams[i].subscribed) continue;
-      polls[num_polls].events = ZMQ_POLLIN;
-      if (streams[i].bufs_outstanding >= 2) {
-        continue;
-      }
-      if (streams[i].tb) {
-        polls[num_polls].fd = tbuffer_efd(streams[i].tbuffer);
-      } else {
-        polls[num_polls].fd = poolq_efd(streams[i].queue);
-      }
-      poll_to_stream[num_polls] = i;
-      num_polls++;
-    }
-    int ret = zmq_poll(polls, num_polls, -1);
-    if (ret < 0) {
-      LOGE("poll failed (%d)", ret);
-      break;
-    }
-    if (polls[0].revents) {
-      break;
-    } else if (polls[1].revents) {
-      VisionPacket p;
-      err = vipc_recv(fd, &p);
-      // printf("recv %d\n", p.type);
-      if (err <= 0) {
-        break;
-      } else if (p.type == VIPC_STREAM_SUBSCRIBE) {
-        VisionStreamType stream_type = p.d.stream_sub.type;
-        VisionPacket rep = {
-          .type = VIPC_STREAM_BUFS,
-          .d = { .stream_bufs = { .type = stream_type }, },
-        };
-
-        VisionClientStreamState *stream = &streams[stream_type];
-        stream->tb = p.d.stream_sub.tbuffer;
-
-        VisionStreamBufs *stream_bufs = &rep.d.stream_bufs;
-        if (stream_type == VISION_STREAM_RGB_BACK) {
-          stream_bufs->width = s->rgb_width;
-          stream_bufs->height = s->rgb_height;
-          stream_bufs->stride = s->rgb_stride;
-          stream_bufs->buf_len = s->rgb_bufs[0].len;
-          rep.num_fds = UI_BUF_COUNT;
-          for (int i=0; i<rep.num_fds; i++) {
-            rep.fds[i] = s->rgb_bufs[i].fd;
-          }
-          if (stream->tb) {
-            stream->tbuffer = &s->ui_tb;
-          } else {
-            assert(false);
-          }
-        } else if (stream_type == VISION_STREAM_RGB_FRONT) {
-          stream_bufs->width = s->rgb_front_width;
-          stream_bufs->height = s->rgb_front_height;
-          stream_bufs->stride = s->rgb_front_stride;
-          stream_bufs->buf_len = s->rgb_front_bufs[0].len;
-          rep.num_fds = UI_BUF_COUNT;
-          for (int i=0; i<rep.num_fds; i++) {
-            rep.fds[i] = s->rgb_front_bufs[i].fd;
-          }
-          if (stream->tb) {
-            stream->tbuffer = &s->ui_front_tb;
-          } else {
-            assert(false);
-          }
-        } else if (stream_type == VISION_STREAM_YUV) {
-          stream_bufs->width = s->yuv_width;
-          stream_bufs->height = s->yuv_height;
-          stream_bufs->stride = s->yuv_width;
-          stream_bufs->buf_len = s->yuv_buf_size;
-          rep.num_fds = YUV_COUNT;
-          for (int i=0; i<rep.num_fds; i++) {
-            rep.fds[i] = s->yuv_ion[i].fd;
-          }
-          if (stream->tb) {
-            stream->tbuffer = s->yuv_tb;
-          } else {
-            stream->queue = pool_get_queue(&s->yuv_pool);
-          }
-        } else if (stream_type == VISION_STREAM_YUV_FRONT) {
-          stream_bufs->width = s->yuv_front_width;
-          stream_bufs->height = s->yuv_front_height;
-          stream_bufs->stride = s->yuv_front_width;
-          stream_bufs->buf_len = s->yuv_front_buf_size;
-          rep.num_fds = YUV_COUNT;
-          for (int i=0; i<rep.num_fds; i++) {
-            rep.fds[i] = s->yuv_front_ion[i].fd;
-          }
-          if (stream->tb) {
-            assert(false);
-          } else {
-            stream->queue = pool_get_queue(&s->yuv_front_pool);
-          }
-        } else {
-          assert(false);
-        }
-
-        if (stream_type == VISION_STREAM_RGB_BACK ||
-            stream_type == VISION_STREAM_RGB_FRONT) {
-          stream_bufs->buf_info.ui_info = (VisionUIInfo){
-            .transformed_width = s->model.in.transformed_width,
-            .transformed_height = s->model.in.transformed_height,
-          };
-        }
-        vipc_send(fd, &rep);
-        streams[stream_type].subscribed = true;
-      } else if (p.type == VIPC_STREAM_RELEASE) {
-        // printf("client release f %d  %d\n", p.d.stream_rel.type, p.d.stream_rel.idx);
-        int si = p.d.stream_rel.type;
-        assert(si < VISION_STREAM_MAX);
-        if (streams[si].tb) {
-          tbuffer_release(streams[si].tbuffer, p.d.stream_rel.idx);
-        } else {
-          poolq_release(streams[si].queue, p.d.stream_rel.idx);
-        }
-        streams[p.d.stream_rel.type].bufs_outstanding--;
-      } else {
-        assert(false);
-      }
-    } else {
-      int stream_i = VISION_STREAM_MAX;
-      for (int i=2; i<num_polls; i++) {
-        int si = poll_to_stream[i];
-        if (!streams[si].subscribed) continue;
-        if (polls[i].revents) {
-          stream_i = si;
-          break;
-        }
-      }
-      if (stream_i < VISION_STREAM_MAX) {
-        streams[stream_i].bufs_outstanding++;
-        int idx;
-        if (streams[stream_i].tb) {
-          idx = tbuffer_acquire(streams[stream_i].tbuffer);
-        } else {
-          idx = poolq_pop(streams[stream_i].queue);
-        }
-        if (idx < 0) {
-          break;
-        }
-        VisionPacket rep = {
-          .type = VIPC_STREAM_ACQUIRE,
-          .d = {.stream_acq = {
-            .type = (VisionStreamType)stream_i,
-            .idx = idx,
-          }},
-        };
-        if (stream_i == VISION_STREAM_YUV) {
-          rep.d.stream_acq.extra.frame_id = s->yuv_metas[idx].frame_id;
-          rep.d.stream_acq.extra.timestamp_eof = s->yuv_metas[idx].timestamp_eof;
-        } else if (stream_i == VISION_STREAM_YUV_FRONT) {
-          rep.d.stream_acq.extra.frame_id = s->yuv_front_metas[idx].frame_id;
-          rep.d.stream_acq.extra.timestamp_eof = s->yuv_front_metas[idx].timestamp_eof;
-        }
-        vipc_send(fd, &rep);
-      }
-    }
-  }
-
-  LOG("client end fd %d\n", fd);
-
-  for (int i=0; i<VISION_STREAM_MAX; i++) {
-    if (!streams[i].subscribed) continue;
-    if (streams[i].tb) {
-      tbuffer_release_all(streams[i].tbuffer);
-    } else {
-      pool_release_queue(streams[i].queue);
-    }
-  }
-
-  close(fd);
-  zsock_destroy(&terminate);
-
-  pthread_mutex_lock(&s->clients_lock);
-  client->running = false;
-  pthread_mutex_unlock(&s->clients_lock);
-
-  return NULL;
-}
-
-void* visionserver_thread(void* arg) {
-  int err;
-  VisionState *s = (VisionState*)arg;
-
-  set_thread_name("visionserver");
-
-  zsock_t *terminate = zsock_new_sub(">inproc://terminate", "");
-  assert(terminate);
-  void* terminate_raw = zsock_resolve(terminate);
-
-  unlink(VIPC_SOCKET_PATH);
-
-  int sock = socket(AF_UNIX, SOCK_SEQPACKET, 0);
-  struct sockaddr_un addr = {
-    .sun_family = AF_UNIX,
-    .sun_path = VIPC_SOCKET_PATH,
-  };
-  err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
-  assert(err == 0);
-
-  err = listen(sock, 3);
-  assert(err == 0);
-
-  // printf("waiting\n");
-
-  while (!do_exit) {
-    zmq_pollitem_t polls[2] = {{0}};
-    polls[0].socket = terminate_raw;
-    polls[0].events = ZMQ_POLLIN;
-    polls[1].fd = sock;
-    polls[1].events = ZMQ_POLLIN;
-
-    int ret = zmq_poll(polls, ARRAYSIZE(polls), -1);
-    if (ret < 0) {
-      LOGE("poll failed (%d)", ret);
-      break;
-    }
-    if (polls[0].revents) {
-      break;
-    } else if (!polls[1].revents) {
-      continue;
-    }
-
-    int fd = accept(sock, NULL, NULL);
-    assert(fd >= 0);
-
-    pthread_mutex_lock(&s->clients_lock);
-
-    int client_idx = 0;
-    for (; client_idx < MAX_CLIENTS; client_idx++) {
-      if (!s->clients[client_idx].running) break;
-    }
-
-    if (client_idx >= MAX_CLIENTS) {
-      LOG("ignoring visionserver connection, max clients connected");
-      close(fd);
-
-      pthread_mutex_unlock(&s->clients_lock);
-      continue;
-    }
-
-    VisionClientState *client = &s->clients[client_idx];
-    client->s = s;
-    client->fd = fd;
-    client->running = true;
-
-    err = pthread_create(&client->thread_handle, NULL,
-                         visionserver_client_thread, client);
-    assert(err == 0);
-
-    pthread_mutex_unlock(&s->clients_lock);
-  }
-
-  for (int i=0; i<MAX_CLIENTS; i++) {
-    pthread_mutex_lock(&s->clients_lock);
-    bool running = s->clients[i].running;
-    pthread_mutex_unlock(&s->clients_lock);
-    if (running) {
-      err = pthread_join(s->clients[i].thread_handle, NULL);
-      assert(err == 0);
-    }
-  }
-
-  close(sock);
-  zsock_destroy(&terminate);
-
-  return NULL;
-}
-
-void* monitoring_thread(void *arg) {
-  int err;
-  VisionState *s = (VisionState*)arg;
-
-  set_thread_name("monitoring");
-
-  TBuffer *tb = pool_get_tbuffer(&s->yuv_front_pool);
-
-  cl_command_queue q = clCreateCommandQueue(s->context, s->device_id, 0, &err);
-  assert(err == 0);
-
-  double last = 0;
-  while (!do_exit) {
-    int buf_idx = tbuffer_acquire(tb);
-    if (buf_idx < 0) {
-      break;
-    }
-
-    FrameMetadata frame_data = s->yuv_front_metas[buf_idx];
-
-    // only process every frame
-    if ((frame_data.frame_id % 1) == 0) {
-
-      double t1 = millis_since_boot();
-
-      MonitoringResult res = monitoring_eval_frame(&s->monitoring, q,
-        s->yuv_front_cl[buf_idx], s->yuv_front_width, s->yuv_front_height);
-
-      double t2 = millis_since_boot();
-
-      // set front camera metering target
-      if (res.face_prob > 0.4)
-      {
-        int x_offset = s->rgb_front_width - 0.5 * s->rgb_front_height;
-        s->front_meteringbox_xmin = x_offset + (res.face_position[0] + 0.5) * (0.5 * s->rgb_front_height) - 72;
-        s->front_meteringbox_xmax = x_offset + (res.face_position[0] + 0.5) * (0.5 * s->rgb_front_height) + 72;
-        s->front_meteringbox_ymin = (res.face_position[1] + 0.5) * (s->rgb_front_height) - 72;
-        s->front_meteringbox_ymax = (res.face_position[1] + 0.5) * (s->rgb_front_height) + 72;
-      }
-      else // use default setting if no face
-      {
-        s->front_meteringbox_ymin = s->rgb_front_height * 1 / 3;
-        s->front_meteringbox_ymax = s->rgb_front_height * 1;
-        s->front_meteringbox_xmin = s->rgb_front_width * 3 / 5;
-        s->front_meteringbox_xmax = s->rgb_front_width;
-      }
-
-      // send dm packet
-      monitoring_publish(s->monitoring_sock, frame_data.frame_id, res, ir_target_set(&s->cameras.front.cur_gain_frac, res));
-
-      //t2 = millis_since_boot();
-      //LOGD("monitoring process: %.2fms, from last %.2fms", t2-t1, t1-last);
-      last = t1;
-    }
-
-    tbuffer_release(tb, buf_idx);
-  }
-
-  return NULL;
-}
-
-void* frontview_thread(void *arg) {
-  int err;
-  VisionState *s = (VisionState*)arg;
-
-  set_thread_name("frontview");
-
-  cl_command_queue q = clCreateCommandQueue(s->context, s->device_id, 0, &err);
-  assert(err == 0);
-
-  for (int cnt = 0; !do_exit; cnt++) {
-    int buf_idx = tbuffer_acquire(&s->cameras.front.camera_tb);
-    if (buf_idx < 0) {
-      break;
-    }
-
-    int ui_idx = tbuffer_select(&s->ui_front_tb);
-    FrameMetadata frame_data = s->cameras.front.camera_bufs_metadata[buf_idx];
-
-    double t1 = millis_since_boot();
-
-    err = clSetKernelArg(s->krnl_debayer_front, 0, sizeof(cl_mem), &s->front_camera_bufs_cl[buf_idx]);
-    assert(err == 0);
-    err = clSetKernelArg(s->krnl_debayer_front, 1, sizeof(cl_mem), &s->rgb_front_bufs_cl[ui_idx]);
-    assert(err == 0);
-    float digital_gain = 1.0;
-    err = clSetKernelArg(s->krnl_debayer_front, 2, sizeof(float), &digital_gain);
-    assert(err == 0);
-
-    cl_event debayer_event;
-    const size_t debayer_work_size = s->rgb_front_height;
-    const size_t debayer_local_work_size = 128;
-    err = clEnqueueNDRangeKernel(q, s->krnl_debayer_front, 1, NULL,
-                                 &debayer_work_size, &debayer_local_work_size, 0, 0, &debayer_event);
-    assert(err == 0);
-    clWaitForEvents(1, &debayer_event);
-    clReleaseEvent(debayer_event);
-
-    tbuffer_release(&s->cameras.front.camera_tb, buf_idx);
-
-    visionbuf_sync(&s->rgb_front_bufs[ui_idx], VISIONBUF_SYNC_FROM_DEVICE);
-
-    // auto exposure
-    const uint8_t *bgr_front_ptr = (const uint8_t*)s->rgb_front_bufs[ui_idx].addr;
-#ifndef DEBUG_DRIVER_MONITOR
-    if (cnt % 3 == 0)
-#endif
-    {
-      // use driver face crop for AE
-      int x_start;
-      int x_end;
-      int y_start;
-      int y_end;
-
-      if (s->front_meteringbox_xmax > 0)
-      {
-        x_start = s->front_meteringbox_xmin<0 ? 0:s->front_meteringbox_xmin;
-        x_end = s->front_meteringbox_xmax>=s->rgb_front_width ? s->rgb_front_width-1:s->front_meteringbox_xmax;
-        y_start = s->front_meteringbox_ymin<0 ? 0:s->front_meteringbox_ymin;
-        y_end = s->front_meteringbox_ymax>=s->rgb_front_height ? s->rgb_front_height-1:s->front_meteringbox_ymax;
-      }
-      else
-      {
-        y_start = s->rgb_front_height * 1 / 3;
-        y_end = s->rgb_front_height * 1;
-        x_start = s->rgb_front_width * 3 / 5;
-        x_end = s->rgb_front_width;
-      }
-
-      uint32_t lum_binning[256] = {0,};
-      for (int y = y_start; y < y_end; ++y) {
-        for (int x = x_start; x < x_end; x += 2) { // every 2nd col
-          const uint8_t *pix = &bgr_front_ptr[y * s->rgb_front_stride + x * 3];
-          unsigned int lum = (unsigned int)pix[0] + pix[1] + pix[2];
-#ifdef DEBUG_DRIVER_MONITOR
-          uint8_t *pix_rw = (uint8_t *)pix;
-
-          // set all the autoexposure pixels to pure green (pixel format is bgr)
-          pix_rw[0] = pix_rw[2] = 0;
-          pix_rw[1] = 0xff;
-#endif
-          lum_binning[std::min(lum / 3, 255u)]++;
-        }
-      }
-      const unsigned int lum_total = (y_end - y_start) * (x_end - x_start)/2;
-      unsigned int lum_cur = 0;
-      int lum_med = 0;
-      for (lum_med=0; lum_med<256; lum_med++) {
-        lum_cur += lum_binning[lum_med];
-        if (lum_cur >= lum_total / 2) {
-          break;
-        }
-      }
-      camera_autoexposure(&s->cameras.front, lum_med / 256.0);
-    }
-
-    // push YUV buffer
-    int yuv_idx = pool_select(&s->yuv_front_pool);
-    s->yuv_front_metas[yuv_idx] = frame_data;
-
-    rgb_to_yuv_queue(&s->front_rgb_to_yuv_state, q, s->rgb_front_bufs_cl[ui_idx], s->yuv_front_cl[yuv_idx]);
-    visionbuf_sync(&s->yuv_front_ion[yuv_idx], VISIONBUF_SYNC_FROM_DEVICE);
-    s->yuv_front_metas[yuv_idx] = frame_data;
-
-    // no reference required cause we don't use this in visiond
-    //pool_acquire(&s->yuv_front_pool, yuv_idx);
-    pool_push(&s->yuv_front_pool, yuv_idx);
-    //pool_release(&s->yuv_front_pool, yuv_idx);
-
-    /*FILE *f = fopen("/tmp/test2", "wb");
-    printf("%d %d\n", s->rgb_front_height, s->rgb_front_stride);
-    fwrite(bgr_front_ptr, 1, s->rgb_front_stride * s->rgb_front_height, f);
-    fclose(f);*/
-
-    tbuffer_dispatch(&s->ui_front_tb, ui_idx);
-
-    double t2 = millis_since_boot();
-
-    //LOGD("front process: %.2fms", t2-t1);
-  }
-
-  return NULL;
-}
+// void* visionserver_client_thread(void* arg) {
+//   int err;
+//   VisionClientState *client = (VisionClientState*)arg;
+//   VisionState *s = client->s;
+//   int fd = client->fd;
+//
+//   set_thread_name("clientthread");
+//
+//   zsock_t *terminate = zsock_new_sub(">inproc://terminate", "");
+//   assert(terminate);
+//   void* terminate_raw = zsock_resolve(terminate);
+//
+//   VisionClientStreamState streams[VISION_STREAM_MAX] = {{0}};
+//
+//   LOG("client start fd %d\n", fd);
+//
+//   while (true) {
+//     zmq_pollitem_t polls[2+VISION_STREAM_MAX] = {{0}};
+//     polls[0].socket = terminate_raw;
+//     polls[0].events = ZMQ_POLLIN;
+//     polls[1].fd = fd;
+//     polls[1].events = ZMQ_POLLIN;
+//
+//     int poll_to_stream[2+VISION_STREAM_MAX] = {0};
+//     int num_polls = 2;
+//     for (int i=0; i<VISION_STREAM_MAX; i++) {
+//       if (!streams[i].subscribed) continue;
+//       polls[num_polls].events = ZMQ_POLLIN;
+//       if (streams[i].bufs_outstanding >= 2) {
+//         continue;
+//       }
+//       if (streams[i].tb) {
+//         polls[num_polls].fd = tbuffer_efd(streams[i].tbuffer);
+//       } else {
+//         polls[num_polls].fd = poolq_efd(streams[i].queue);
+//       }
+//       poll_to_stream[num_polls] = i;
+//       num_polls++;
+//     }
+//     int ret = zmq_poll(polls, num_polls, -1);
+//     if (ret < 0) {
+//       LOGE("poll failed (%d)", ret);
+//       break;
+//     }
+//     if (polls[0].revents) {
+//       break;
+//     } else if (polls[1].revents) {
+//       VisionPacket p;
+//       err = vipc_recv(fd, &p);
+//       // printf("recv %d\n", p.type);
+//       if (err <= 0) {
+//         break;
+//       } else if (p.type == VIPC_STREAM_SUBSCRIBE) {
+//         VisionStreamType stream_type = p.d.stream_sub.type;
+//         VisionPacket rep = {
+//           .type = VIPC_STREAM_BUFS,
+//           .d = { .stream_bufs = { .type = stream_type }, },
+//         };
+//
+//         VisionClientStreamState *stream = &streams[stream_type];
+//         stream->tb = p.d.stream_sub.tbuffer;
+//
+//         VisionStreamBufs *stream_bufs = &rep.d.stream_bufs;
+//         if (stream_type == VISION_STREAM_RGB_BACK) {
+//           stream_bufs->width = s->rgb_width;
+//           stream_bufs->height = s->rgb_height;
+//           stream_bufs->stride = s->rgb_stride;
+//           stream_bufs->buf_len = s->rgb_bufs[0].len;
+//           rep.num_fds = UI_BUF_COUNT;
+//           for (int i=0; i<rep.num_fds; i++) {
+//             rep.fds[i] = s->rgb_bufs[i].fd;
+//           }
+//           if (stream->tb) {
+//             stream->tbuffer = &s->ui_tb;
+//           } else {
+//             assert(false);
+//           }
+//         } else if (stream_type == VISION_STREAM_RGB_FRONT) {
+//           stream_bufs->width = s->rgb_front_width;
+//           stream_bufs->height = s->rgb_front_height;
+//           stream_bufs->stride = s->rgb_front_stride;
+//           stream_bufs->buf_len = s->rgb_front_bufs[0].len;
+//           rep.num_fds = UI_BUF_COUNT;
+//           for (int i=0; i<rep.num_fds; i++) {
+//             rep.fds[i] = s->rgb_front_bufs[i].fd;
+//           }
+//           if (stream->tb) {
+//             stream->tbuffer = &s->ui_front_tb;
+//           } else {
+//             assert(false);
+//           }
+//         } else if (stream_type == VISION_STREAM_YUV) {
+//           stream_bufs->width = s->yuv_width;
+//           stream_bufs->height = s->yuv_height;
+//           stream_bufs->stride = s->yuv_width;
+//           stream_bufs->buf_len = s->yuv_buf_size;
+//           rep.num_fds = YUV_COUNT;
+//           for (int i=0; i<rep.num_fds; i++) {
+//             rep.fds[i] = s->yuv_ion[i].fd;
+//           }
+//           if (stream->tb) {
+//             stream->tbuffer = s->yuv_tb;
+//           } else {
+//             stream->queue = pool_get_queue(&s->yuv_pool);
+//           }
+//         } else if (stream_type == VISION_STREAM_YUV_FRONT) {
+//           stream_bufs->width = s->yuv_front_width;
+//           stream_bufs->height = s->yuv_front_height;
+//           stream_bufs->stride = s->yuv_front_width;
+//           stream_bufs->buf_len = s->yuv_front_buf_size;
+//           rep.num_fds = YUV_COUNT;
+//           for (int i=0; i<rep.num_fds; i++) {
+//             rep.fds[i] = s->yuv_front_ion[i].fd;
+//           }
+//           if (stream->tb) {
+//             assert(false);
+//           } else {
+//             stream->queue = pool_get_queue(&s->yuv_front_pool);
+//           }
+//         } else {
+//           assert(false);
+//         }
+//
+//         if (stream_type == VISION_STREAM_RGB_BACK ||
+//             stream_type == VISION_STREAM_RGB_FRONT) {
+//           stream_bufs->buf_info.ui_info = (VisionUIInfo){
+//             .transformed_width = s->model.in.transformed_width,
+//             .transformed_height = s->model.in.transformed_height,
+//           };
+//         }
+//         vipc_send(fd, &rep);
+//         streams[stream_type].subscribed = true;
+//       } else if (p.type == VIPC_STREAM_RELEASE) {
+//         // printf("client release f %d  %d\n", p.d.stream_rel.type, p.d.stream_rel.idx);
+//         int si = p.d.stream_rel.type;
+//         assert(si < VISION_STREAM_MAX);
+//         if (streams[si].tb) {
+//           tbuffer_release(streams[si].tbuffer, p.d.stream_rel.idx);
+//         } else {
+//           poolq_release(streams[si].queue, p.d.stream_rel.idx);
+//         }
+//         streams[p.d.stream_rel.type].bufs_outstanding--;
+//       } else {
+//         assert(false);
+//       }
+//     } else {
+//       int stream_i = VISION_STREAM_MAX;
+//       for (int i=2; i<num_polls; i++) {
+//         int si = poll_to_stream[i];
+//         if (!streams[si].subscribed) continue;
+//         if (polls[i].revents) {
+//           stream_i = si;
+//           break;
+//         }
+//       }
+//       if (stream_i < VISION_STREAM_MAX) {
+//         streams[stream_i].bufs_outstanding++;
+//         int idx;
+//         if (streams[stream_i].tb) {
+//           idx = tbuffer_acquire(streams[stream_i].tbuffer);
+//         } else {
+//           idx = poolq_pop(streams[stream_i].queue);
+//         }
+//         if (idx < 0) {
+//           break;
+//         }
+//         VisionPacket rep = {
+//           .type = VIPC_STREAM_ACQUIRE,
+//           .d = {.stream_acq = {
+//             .type = (VisionStreamType)stream_i,
+//             .idx = idx,
+//           }},
+//         };
+//         if (stream_i == VISION_STREAM_YUV) {
+//           rep.d.stream_acq.extra.frame_id = s->yuv_metas[idx].frame_id;
+//           rep.d.stream_acq.extra.timestamp_eof = s->yuv_metas[idx].timestamp_eof;
+//         } else if (stream_i == VISION_STREAM_YUV_FRONT) {
+//           rep.d.stream_acq.extra.frame_id = s->yuv_front_metas[idx].frame_id;
+//           rep.d.stream_acq.extra.timestamp_eof = s->yuv_front_metas[idx].timestamp_eof;
+//         }
+//         vipc_send(fd, &rep);
+//       }
+//     }
+//   }
+//
+//   LOG("client end fd %d\n", fd);
+//
+//   for (int i=0; i<VISION_STREAM_MAX; i++) {
+//     if (!streams[i].subscribed) continue;
+//     if (streams[i].tb) {
+//       tbuffer_release_all(streams[i].tbuffer);
+//     } else {
+//       pool_release_queue(streams[i].queue);
+//     }
+//   }
+//
+//   close(fd);
+//   zsock_destroy(&terminate);
+//
+//   pthread_mutex_lock(&s->clients_lock);
+//   client->running = false;
+//   pthread_mutex_unlock(&s->clients_lock);
+//
+//   return NULL;
+// }
+
+// void* visionserver_thread(void* arg) {
+//   int err;
+//   VisionState *s = (VisionState*)arg;
+//
+//   set_thread_name("visionserver");
+//
+//   zsock_t *terminate = zsock_new_sub(">inproc://terminate", "");
+//   assert(terminate);
+//   void* terminate_raw = zsock_resolve(terminate);
+//
+//   unlink(VIPC_SOCKET_PATH);
+//
+//   int sock = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+//   struct sockaddr_un addr = {
+//     .sun_family = AF_UNIX,
+//     .sun_path = VIPC_SOCKET_PATH,
+//   };
+//   err = bind(sock, (struct sockaddr *)&addr, sizeof(addr));
+//   assert(err == 0);
+//
+//   err = listen(sock, 3);
+//   assert(err == 0);
+//
+//   // printf("waiting\n");
+//
+//   while (!do_exit) {
+//     zmq_pollitem_t polls[2] = {{0}};
+//     polls[0].socket = terminate_raw;
+//     polls[0].events = ZMQ_POLLIN;
+//     polls[1].fd = sock;
+//     polls[1].events = ZMQ_POLLIN;
+//
+//     int ret = zmq_poll(polls, ARRAYSIZE(polls), -1);
+//     if (ret < 0) {
+//       LOGE("poll failed (%d)", ret);
+//       break;
+//     }
+//     if (polls[0].revents) {
+//       break;
+//     } else if (!polls[1].revents) {
+//       continue;
+//     }
+//
+//     int fd = accept(sock, NULL, NULL);
+//     assert(fd >= 0);
+//
+//     pthread_mutex_lock(&s->clients_lock);
+//
+//     int client_idx = 0;
+//     for (; client_idx < MAX_CLIENTS; client_idx++) {
+//       if (!s->clients[client_idx].running) break;
+//     }
+//
+//     if (client_idx >= MAX_CLIENTS) {
+//       LOG("ignoring visionserver connection, max clients connected");
+//       close(fd);
+//
+//       pthread_mutex_unlock(&s->clients_lock);
+//       continue;
+//     }
+//
+//     VisionClientState *client = &s->clients[client_idx];
+//     client->s = s;
+//     client->fd = fd;
+//     client->running = true;
+//
+//     err = pthread_create(&client->thread_handle, NULL,
+//                          visionserver_client_thread, client);
+//     assert(err == 0);
+//
+//     pthread_mutex_unlock(&s->clients_lock);
+//   }
+//
+//   for (int i=0; i<MAX_CLIENTS; i++) {
+//     pthread_mutex_lock(&s->clients_lock);
+//     bool running = s->clients[i].running;
+//     pthread_mutex_unlock(&s->clients_lock);
+//     if (running) {
+//       err = pthread_join(s->clients[i].thread_handle, NULL);
+//       assert(err == 0);
+//     }
+//   }
+//
+//   close(sock);
+//   zsock_destroy(&terminate);
+//
+//   return NULL;
+// }
+
+// void* monitoring_thread(void *arg) {
+//   int err;
+//   VisionState *s = (VisionState*)arg;
+//
+//   set_thread_name("monitoring");
+//
+//   TBuffer *tb = pool_get_tbuffer(&s->yuv_front_pool);
+//
+//   cl_command_queue q = clCreateCommandQueue(s->context, s->device_id, 0, &err);
+//   assert(err == 0);
+//
+//   double last = 0;
+//   while (!do_exit) {
+//     int buf_idx = tbuffer_acquire(tb);
+//     if (buf_idx < 0) {
+//       break;
+//     }
+//
+//     FrameMetadata frame_data = s->yuv_front_metas[buf_idx];
+//
+//     // only process every frame
+//     if ((frame_data.frame_id % 1) == 0) {
+//
+//       double t1 = millis_since_boot();
+//
+//       MonitoringResult res = monitoring_eval_frame(&s->monitoring, q,
+//         s->yuv_front_cl[buf_idx], s->yuv_front_width, s->yuv_front_height);
+//
+//       double t2 = millis_since_boot();
+//
+//       // set front camera metering target
+//       if (res.face_prob > 0.4)
+//       {
+//         int x_offset = s->rgb_front_width - 0.5 * s->rgb_front_height;
+//         s->front_meteringbox_xmin = x_offset + (res.face_position[0] + 0.5) * (0.5 * s->rgb_front_height) - 72;
+//         s->front_meteringbox_xmax = x_offset + (res.face_position[0] + 0.5) * (0.5 * s->rgb_front_height) + 72;
+//         s->front_meteringbox_ymin = (res.face_position[1] + 0.5) * (s->rgb_front_height) - 72;
+//         s->front_meteringbox_ymax = (res.face_position[1] + 0.5) * (s->rgb_front_height) + 72;
+//       }
+//       else // use default setting if no face
+//       {
+//         s->front_meteringbox_ymin = s->rgb_front_height * 1 / 3;
+//         s->front_meteringbox_ymax = s->rgb_front_height * 1;
+//         s->front_meteringbox_xmin = s->rgb_front_width * 3 / 5;
+//         s->front_meteringbox_xmax = s->rgb_front_width;
+//       }
+//
+//       // send dm packet
+//       monitoring_publish(s->monitoring_sock, frame_data.frame_id, res, ir_target_set(&s->cameras.front.cur_gain_frac, res));
+//
+//       //t2 = millis_since_boot();
+//       //LOGD("monitoring process: %.2fms, from last %.2fms", t2-t1, t1-last);
+//       last = t1;
+//     }
+//
+//     tbuffer_release(tb, buf_idx);
+//   }
+//
+//   return NULL;
+// }
+
+// void* frontview_thread(void *arg) {
+//   int err;
+//   VisionState *s = (VisionState*)arg;
+//
+//   set_thread_name("frontview");
+//
+//   cl_command_queue q = clCreateCommandQueue(s->context, s->device_id, 0, &err);
+//   assert(err == 0);
+//
+//   for (int cnt = 0; !do_exit; cnt++) {
+//     int buf_idx = tbuffer_acquire(&s->cameras.front.camera_tb);
+//     if (buf_idx < 0) {
+//       break;
+//     }
+//
+//     int ui_idx = tbuffer_select(&s->ui_front_tb);
+//     FrameMetadata frame_data = s->cameras.front.camera_bufs_metadata[buf_idx];
+//
+//     double t1 = millis_since_boot();
+//
+//     err = clSetKernelArg(s->krnl_debayer_front, 0, sizeof(cl_mem), &s->front_camera_bufs_cl[buf_idx]);
+//     assert(err == 0);
+//     err = clSetKernelArg(s->krnl_debayer_front, 1, sizeof(cl_mem), &s->rgb_front_bufs_cl[ui_idx]);
+//     assert(err == 0);
+//     float digital_gain = 1.0;
+//     err = clSetKernelArg(s->krnl_debayer_front, 2, sizeof(float), &digital_gain);
+//     assert(err == 0);
+//
+//     cl_event debayer_event;
+//     const size_t debayer_work_size = s->rgb_front_height;
+//     const size_t debayer_local_work_size = 128;
+//     err = clEnqueueNDRangeKernel(q, s->krnl_debayer_front, 1, NULL,
+//                                  &debayer_work_size, &debayer_local_work_size, 0, 0, &debayer_event);
+//     assert(err == 0);
+//     clWaitForEvents(1, &debayer_event);
+//     clReleaseEvent(debayer_event);
+//
+//     tbuffer_release(&s->cameras.front.camera_tb, buf_idx);
+//
+//     visionbuf_sync(&s->rgb_front_bufs[ui_idx], VISIONBUF_SYNC_FROM_DEVICE);
+//
+//     // auto exposure
+//     const uint8_t *bgr_front_ptr = (const uint8_t*)s->rgb_front_bufs[ui_idx].addr;
+// #ifndef DEBUG_DRIVER_MONITOR
+//     if (cnt % 3 == 0)
+// #endif
+//     {
+//       // use driver face crop for AE
+//       int x_start;
+//       int x_end;
+//       int y_start;
+//       int y_end;
+//
+//       if (s->front_meteringbox_xmax > 0)
+//       {
+//         x_start = s->front_meteringbox_xmin<0 ? 0:s->front_meteringbox_xmin;
+//         x_end = s->front_meteringbox_xmax>=s->rgb_front_width ? s->rgb_front_width-1:s->front_meteringbox_xmax;
+//         y_start = s->front_meteringbox_ymin<0 ? 0:s->front_meteringbox_ymin;
+//         y_end = s->front_meteringbox_ymax>=s->rgb_front_height ? s->rgb_front_height-1:s->front_meteringbox_ymax;
+//       }
+//       else
+//       {
+//         y_start = s->rgb_front_height * 1 / 3;
+//         y_end = s->rgb_front_height * 1;
+//         x_start = s->rgb_front_width * 3 / 5;
+//         x_end = s->rgb_front_width;
+//       }
+//
+//       uint32_t lum_binning[256] = {0,};
+//       for (int y = y_start; y < y_end; ++y) {
+//         for (int x = x_start; x < x_end; x += 2) { // every 2nd col
+//           const uint8_t *pix = &bgr_front_ptr[y * s->rgb_front_stride + x * 3];
+//           unsigned int lum = (unsigned int)pix[0] + pix[1] + pix[2];
+// #ifdef DEBUG_DRIVER_MONITOR
+//           uint8_t *pix_rw = (uint8_t *)pix;
+//
+//           // set all the autoexposure pixels to pure green (pixel format is bgr)
+//           pix_rw[0] = pix_rw[2] = 0;
+//           pix_rw[1] = 0xff;
+// #endif
+//           lum_binning[std::min(lum / 3, 255u)]++;
+//         }
+//       }
+//       const unsigned int lum_total = (y_end - y_start) * (x_end - x_start)/2;
+//       unsigned int lum_cur = 0;
+//       int lum_med = 0;
+//       for (lum_med=0; lum_med<256; lum_med++) {
+//         lum_cur += lum_binning[lum_med];
+//         if (lum_cur >= lum_total / 2) {
+//           break;
+//         }
+//       }
+//       camera_autoexposure(&s->cameras.front, lum_med / 256.0);
+//     }
+//
+//     // push YUV buffer
+//     int yuv_idx = pool_select(&s->yuv_front_pool);
+//     s->yuv_front_metas[yuv_idx] = frame_data;
+//
+//     rgb_to_yuv_queue(&s->front_rgb_to_yuv_state, q, s->rgb_front_bufs_cl[ui_idx], s->yuv_front_cl[yuv_idx]);
+//     visionbuf_sync(&s->yuv_front_ion[yuv_idx], VISIONBUF_SYNC_FROM_DEVICE);
+//     s->yuv_front_metas[yuv_idx] = frame_data;
+//
+//     // no reference required cause we don't use this in visiond
+//     //pool_acquire(&s->yuv_front_pool, yuv_idx);
+//     pool_push(&s->yuv_front_pool, yuv_idx);
+//     //pool_release(&s->yuv_front_pool, yuv_idx);
+//
+//     /*FILE *f = fopen("/tmp/test2", "wb");
+//     printf("%d %d\n", s->rgb_front_height, s->rgb_front_stride);
+//     fwrite(bgr_front_ptr, 1, s->rgb_front_stride * s->rgb_front_height, f);
+//     fclose(f);*/
+//
+//     tbuffer_dispatch(&s->ui_front_tb, ui_idx);
+//
+//     double t2 = millis_since_boot();
+//
+//     //LOGD("front process: %.2fms", t2-t1);
+//   }
+//
+//   return NULL;
+// }
 
 void* processing_thread(void *arg) {
   int err;
@@ -889,8 +890,10 @@ void* processing_thread(void *arg) {
   LOG("setpriority returns %d", err);
 
   // init cl stuff
-  const cl_queue_properties props[] = {0}; //CL_QUEUE_PRIORITY_KHR, CL_QUEUE_PRIORITY_HIGH_KHR, 0};
-  cl_command_queue q = clCreateCommandQueueWithProperties(s->context, s->device_id, props, &err);
+  // const cl_queue_properties props[] = {0}; //CL_QUEUE_PRIORITY_KHR, CL_QUEUE_PRIORITY_HIGH_KHR, 0};
+  const cl_command_queue_properties props = 0;  // Junjie: for adapting to cuda-based opencl
+  // cl_command_queue q = clCreateCommandQueueWithProperties(s->context, s->device_id, props, &err);
+  cl_command_queue q = clCreateCommandQueue(s->context, s->device_id, props, &err);  // Junjie: for adapting to cuda-based opencl
   assert(err == 0);
 
   Context * context = Context::create();
@@ -904,14 +907,15 @@ void* processing_thread(void *arg) {
   void *img_sock_raw = NULL;
 #endif
 
-#ifdef DUMP_RGB
-  s->rgb_width = s->frame_width;
-  s->rgb_height = s->frame_height;
-  FILE *dump_rgb_file = fopen("/sdcard/dump.rgb", "wb");
-#endif
+// #ifdef DUMP_RGB
+//   s->rgb_width = s->frame_width;
+//   s->rgb_height = s->frame_height;
+//   FILE *dump_rgb_file = fopen("/sdcard/dump.rgb", "wb");
+// #endif
 
   // init the net
   LOG("processing start!");
+  printf("Visiond: processing start!\n");
 
   for (int cnt = 0; !do_exit; cnt++) {
     int buf_idx = tbuffer_acquire(&s->cameras.rear.camera_tb);
@@ -927,15 +931,19 @@ void* processing_thread(void *arg) {
 
     if (frame_id == -1) {
       LOGE("no frame data? wtf");
+      printf("no frame data? wtf\n");
       tbuffer_release(&s->cameras.rear.camera_tb, buf_idx);
       continue;
     }
+    printf("Visiond: processing frame id %d\n", frame_id);
 
     int ui_idx = tbuffer_select(&s->ui_tb);
     int rgb_idx = ui_idx;
 
+#if 0
     cl_event debayer_event;
     if (s->cameras.rear.ci.bayer) {
+      printf("Visiond: debayer\n");
       err = clSetKernelArg(s->krnl_debayer_rear, 0, sizeof(cl_mem), &s->camera_bufs_cl[buf_idx]);
       cl_check_error(err);
       err = clSetKernelArg(s->krnl_debayer_rear, 1, sizeof(cl_mem), &s->rgb_bufs_cl[rgb_idx]);
@@ -949,6 +957,7 @@ void* processing_thread(void *arg) {
                                    &debayer_work_size, &debayer_local_work_size, 0, 0, &debayer_event);
       assert(err == 0);
     } else {
+      printf("Visiond: copy buffer, frame size %d\n", s->frame_size);
       assert(s->rgb_buf_size >= s->frame_size);
       assert(s->rgb_stride == s->frame_stride);
       err = clEnqueueCopyBuffer(q, s->camera_bufs_cl[buf_idx], s->rgb_bufs_cl[rgb_idx],
@@ -958,23 +967,24 @@ void* processing_thread(void *arg) {
 
     clWaitForEvents(1, &debayer_event);
     clReleaseEvent(debayer_event);
+#endif
 
     tbuffer_release(&s->cameras.rear.camera_tb, buf_idx);
 
-    visionbuf_sync(&s->rgb_bufs[rgb_idx], VISIONBUF_SYNC_FROM_DEVICE);
+    // visionbuf_sync(&s->rgb_bufs[rgb_idx], VISIONBUF_SYNC_FROM_DEVICE);
 
 
     double t2 = millis_since_boot();
 
-    uint8_t *bgr_ptr = (uint8_t*)s->rgb_bufs[rgb_idx].addr;
+    // uint8_t *bgr_ptr = (uint8_t*)s->rgb_bufs[rgb_idx].addr;
 
-#ifdef DUMP_RGB
-    if (cnt % 20 == 0) {
-      fwrite(bgr_ptr, s->rgb_buf_size, 1, dump_rgb_file);
-      LOG("%d x %d", s->rgb_width, s->rgb_height);
-      assert(1==2);
-    }
-#endif
+// #ifdef DUMP_RGB
+//     if (cnt % 20 == 0) {
+//       fwrite(bgr_ptr, s->rgb_buf_size, 1, dump_rgb_file);
+//       LOG("%d x %d", s->rgb_width, s->rgb_height);
+//       assert(1==2);
+//     }
+// #endif
 
     double yt1 = millis_since_boot();
 
@@ -986,7 +996,16 @@ void* processing_thread(void *arg) {
     uint8_t* yuv_ptr_u = s->yuv_bufs[yuv_idx].u;
     uint8_t* yuv_ptr_v = s->yuv_bufs[yuv_idx].v;
     cl_mem yuv_cl = s->yuv_cl[yuv_idx];
-    rgb_to_yuv_queue(&s->rgb_to_yuv_state, q, s->rgb_bufs_cl[rgb_idx], yuv_cl);
+    // rgb_to_yuv_queue(&s->rgb_to_yuv_state, q, s->rgb_bufs_cl[rgb_idx], yuv_cl);
+
+    cl_event yuv_copy_event;
+    err = clEnqueueCopyBuffer(q, s->camera_bufs_cl[buf_idx], yuv_cl,
+                              0, 0, s->yuv_buf_size, 0, 0, &yuv_copy_event);
+    assert(err == 0);
+
+    clWaitForEvents(1, &yuv_copy_event);
+    clReleaseEvent(yuv_copy_event);
+
     visionbuf_sync(&s->yuv_ion[yuv_idx], VISIONBUF_SYNC_FROM_DEVICE);
 
     double yt2 = millis_since_boot();
@@ -1005,16 +1024,26 @@ void* processing_thread(void *arg) {
 
       mat3 model_transform = matmul3(s->yuv_transform, transform);
 
+      // printf("Visiond: model_transform:\n");
+      // for (int i=0; i<3*3; i++) {
+      //   if (i%3 == 0) {
+      //     printf("\n");
+      //   }
+      //   printf("\t%f", model_transform.v[i]);
+      // }
+      // printf("\n");
+
       mt1 = millis_since_boot();
       s->model_bufs[ui_idx] =
           model_eval_frame(&s->model, q, yuv_cl, s->yuv_width, s->yuv_height,
                            model_transform, img_sock_raw, NULL);
       mt2 = millis_since_boot();
 
-      model_publish(model_sock, frame_id, s->model_bufs[ui_idx], frame_data.timestamp_eof);
+      model_publish(model_sock, frame_id, s->model_bufs[ui_idx], frame_data.timestamp_eof, model_transform);
     }
 
 
+#if 0
     // send frame event
     {
       capnp::MallocMessageBuilder msg;
@@ -1047,6 +1076,7 @@ void* processing_thread(void *arg) {
         s->recorder_sock->send((char*)bytes.begin(), bytes.size());
       }
     }
+#endif
 
     // push the frame to the posenet
     // TODO: This doesn't always have to run
@@ -1057,6 +1087,7 @@ void* processing_thread(void *arg) {
 
     // posenet runs every 5
     if (cnt % 5 == 0) {
+      printf("Visiond: eval posenet: %d\n", cnt);
       posenet_eval(&s->posenet);
 
       // send posenet event
@@ -1085,6 +1116,7 @@ void* processing_thread(void *arg) {
       LOGD("pre: %.2fms | posenet: %.2fms", (pt2-pt1), (pt3-pt1));
     }
 
+#if 0
     // one thumbnail per 5 seconds (instead of %5 == 0 posenet)
     if (cnt % 100 == 3) {
       uint8_t* thumbnail_buffer = NULL;
@@ -1145,9 +1177,11 @@ void* processing_thread(void *arg) {
 
       free(thumbnail_buffer);
     }
+#endif
 
     tbuffer_dispatch(&s->ui_tb, ui_idx);
 
+#if 0
     // auto exposure over big box
     const int exposure_x = 290;
     const int exposure_y = 282 + 40;
@@ -1177,6 +1211,7 @@ void* processing_thread(void *arg) {
 
       camera_autoexposure(&s->cameras.rear, lum_med / 256.0);
     }
+#endif
 
     pool_release(&s->yuv_pool, yuv_idx);
 
@@ -1194,9 +1229,11 @@ void* processing_thread(void *arg) {
             (t2-t1), (yt2-yt1), (mt2-mt1), (t5-t1));
   }
 
-#ifdef DUMP_RGB
-  fclose(dump_rgb_file);
-#endif
+  printf("Visiond: processing ends\n");
+
+// #ifdef DUMP_RGB
+//   fclose(dump_rgb_file);
+// #endif
 
   delete model_sock;
   delete context;
@@ -1286,28 +1323,28 @@ void party(VisionState *s) {
   s->terminate_pub = zsock_new_pub("@inproc://terminate");
   assert(s->terminate_pub);
 
-#ifndef __APPLE__
-  pthread_t visionserver_thread_handle;
-  err = pthread_create(&visionserver_thread_handle, NULL,
-                       visionserver_thread, s);
-  assert(err == 0);
-#endif
+// #ifndef __APPLE__
+//   pthread_t visionserver_thread_handle;
+//   err = pthread_create(&visionserver_thread_handle, NULL,
+//                        visionserver_thread, s);
+//   assert(err == 0);
+// #endif
 
   pthread_t proc_thread_handle;
   err = pthread_create(&proc_thread_handle, NULL,
                        processing_thread, s);
   assert(err == 0);
 
-#ifdef QCOM
-  pthread_t frontview_thread_handle;
-  err = pthread_create(&frontview_thread_handle, NULL,
-                       frontview_thread, s);
-  assert(err == 0);
-#endif
-
-  pthread_t monitoring_thread_handle;
-  err = pthread_create(&monitoring_thread_handle, NULL, monitoring_thread, s);
-  assert(err == 0);
+// #ifdef QCOM
+//   pthread_t frontview_thread_handle;
+//   err = pthread_create(&frontview_thread_handle, NULL,
+//                        frontview_thread, s);
+//   assert(err == 0);
+// #endif
+//
+//   pthread_t monitoring_thread_handle;
+//   err = pthread_create(&monitoring_thread_handle, NULL, monitoring_thread, s);
+//   assert(err == 0);
 
   pthread_t live_thread_handle;
   err = pthread_create(&live_thread_handle, NULL,
@@ -1327,17 +1364,17 @@ void party(VisionState *s) {
 
   zsock_signal(s->terminate_pub, 0);
 
-#ifdef QCOM
-  LOG("joining frontview_thread");
-  err = pthread_join(frontview_thread_handle, NULL);
-  assert(err == 0);
-#endif
+// #ifdef QCOM
+//   LOG("joining frontview_thread");
+//   err = pthread_join(frontview_thread_handle, NULL);
+//   assert(err == 0);
+// #endif
 
-#ifndef __APPLE__
-  LOG("joining visionserver_thread");
-  err = pthread_join(visionserver_thread_handle, NULL);
-  assert(err == 0);
-#endif
+// #ifndef __APPLE__
+//   LOG("joining visionserver_thread");
+//   err = pthread_join(visionserver_thread_handle, NULL);
+//   assert(err == 0);
+// #endif
 
   LOG("joining proc_thread");
   err = pthread_join(proc_thread_handle, NULL);
@@ -1379,7 +1416,6 @@ int main(int argc, char **argv) {
   monitoring_init(&s->monitoring, s->device_id, s->context);
   posenet_init(&s->posenet);
 
-
   cameras_init(&s->cameras);
 
   s->frame_width = s->cameras.rear.ci.frame_width;
@@ -1403,8 +1439,9 @@ int main(int argc, char **argv) {
   s->posenet_sock = PubSocket::create(s->msg_context, "cameraOdometry");
   s->thumbnail_sock = PubSocket::create(s->msg_context, "thumbnail");
 
-
   cameras_open(&s->cameras, &s->camera_bufs[0], &s->focus_bufs[0], &s->stats_bufs[0], &s->front_camera_bufs[0]);
+
+  LOG("Main: after camera_open...\n");
 
   if (test_run) {
     do_exit = true;

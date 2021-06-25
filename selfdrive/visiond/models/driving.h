@@ -40,5 +40,5 @@ void model_free(ModelState* s);
 void poly_fit(float *in_pts, float *in_stds, float *out);
 
 void model_publish(PubSocket* sock, uint32_t frame_id,
-                   const ModelData data, uint64_t timestamp_eof);
+                   const ModelData data, uint64_t timestamp_eof, mat3 transform);
 #endif

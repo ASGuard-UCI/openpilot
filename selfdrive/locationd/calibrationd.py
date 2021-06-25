@@ -36,20 +36,43 @@ class Calibrator():
     self.param_put = param_put
     self.vp = copy.copy(VP_INIT)
     self.vps = []
+    # sl_highway v0.6.6
+    self.vp = np.array([584, 383])
+    self.vps = [self.vp] * INPUTS_WANTED
+
+    # sl_local v0.6.6
+    # self.vp = np.array([578, 388])
+    # self.vps = [self.vp] * INPUTS_WANTED
+
+    # # sl_highway v0.7
+    # self.vp = np.array([588.1871978223745, 385.61302930859745])
+    # self.vps = [self.vp] * INPUTS_WANTED
+
+    # # sl_local v0.7
+    # self.vp = np.array([580.5880982918998, 389.04574904852205])
+    # self.vps = [self.vp] * INPUTS_WANTED
+
+    # # sf_local v0.7
+    # self.vp = np.array([582.14950496, 388.2476068])
+    # self.vps = [self.vp] * INPUTS_WANTED
+
+    self.vp_static = self.vp
+
     self.cal_status = Calibration.UNCALIBRATED
     self.write_counter = 0
     self.just_calibrated = False
 
-    # Read calibration
-    calibration_params = Params().get("CalibrationParams")
-    if calibration_params:
-      try:
-        calibration_params = json.loads(calibration_params)
-        self.vp = np.array(calibration_params["vanishing_point"])
-        self.vps = np.tile(self.vp, (calibration_params['valid_points'], 1)).tolist()
-        self.update_status()
-      except Exception:
-        cloudlog.exception("CalibrationParams file found but error encountered")
+    # Junjie: skip reading the calibration file for stability
+    # # Read calibration
+    # calibration_params = Params().get("CalibrationParams")
+    # if calibration_params:
+    #   try:
+    #     calibration_params = json.loads(calibration_params)
+    #     self.vp = np.array(calibration_params["vanishing_point"])
+    #     self.vps = np.tile(self.vp, (calibration_params['valid_points'], 1)).tolist()
+    #     self.update_status()
+    #   except Exception:
+    #     cloudlog.exception("CalibrationParams file found but error encountered")
 
   def update_status(self):
     start_status = self.cal_status
@@ -77,12 +100,17 @@ class Calibrator():
         cal_params = {"vanishing_point": list(self.vp),
                       "valid_points": len(self.vps)}
         put_nonblocking("CalibrationParams", json.dumps(cal_params).encode('utf8'))
+      print('Calibrationd: calculated new vp', new_vp)
       return new_vp
     else:
       return None
 
   def send_data(self, pm):
     calib = get_calib_from_vp(self.vp)
+
+    # print('Calibrationd: send static vp', self.vp_static)
+    # calib = get_calib_from_vp(self.vp_static)
+
     extrinsic_matrix = get_view_frame_from_road_frame(0, calib[1], calib[2], model_height)
 
     cal_send = messaging.new_message()
@@ -109,8 +137,11 @@ def calibrationd_thread(sm=None, pm=None):
     sm.update()
 
     new_vp = calibrator.handle_cam_odom(sm['cameraOdometry'])
-    if DEBUG and new_vp is not None:
+    # if DEBUG and new_vp is not None:
+    if new_vp is not None:
       print('got new vp', new_vp)
+      print('Calibrator write_counter', calibrator.write_counter)
+      print('Calibrator status', calibrator.just_calibrated, calibrator.cal_status)
 
     calibrator.send_data(pm)
 

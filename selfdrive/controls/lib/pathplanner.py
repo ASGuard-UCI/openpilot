@@ -46,6 +46,7 @@ class PathPlanner():
     v_ego = sm['carState'].vEgo
     angle_steers = sm['carState'].steeringAngle
     active = sm['controlsState'].active
+    active = True
 
     angle_offset = sm['liveParameters'].angleOffset
 
@@ -66,6 +67,9 @@ class PathPlanner():
 
     # account for actuation delay
     self.cur_state = calc_states_after_delay(self.cur_state, v_ego, angle_steers - angle_offset, curvature_factor, VM.sR, CP.steerActuatorDelay)
+
+    cloudlog.debug("PathPlanner: MPC speed %.2f, angle steers %.4f, angle offset %.2f, %s", v_ego, angle_steers, angle_offset, active)
+    cloudlog.debug("PathPlanner: MPC cur_state x %.4f, y %.4f, psi %.4f, delta %.4f", self.cur_state[0].x, self.cur_state[0].y, self.cur_state[0].psi, self.cur_state[0].delta)
 
     v_ego_mpc = max(v_ego, 5.0)  # avoid mpc roughness due to low speed
     self.libmpc.run_mpc(self.cur_state, self.mpc_solution,
@@ -93,7 +97,7 @@ class PathPlanner():
 
       if t > self.last_cloudlog_t + 5.0:
         self.last_cloudlog_t = t
-        cloudlog.warning("Lateral mpc - nan: True")
+        cloudlog.warning("PathPlanner: Lateral mpc - nan: True")
 
     if self.mpc_solution[0].cost > 20000. or mpc_nans:   # TODO: find a better way to detect when MPC did not converge
       self.solution_invalid_cnt += 1
@@ -120,6 +124,8 @@ class PathPlanner():
     plan_send.pathPlan.posenetValid = bool(sm['liveParameters'].posenetValid)
 
     pm.send('pathPlan', plan_send)
+
+    cloudlog.debug("PathPlanner: MPC angle_steers_des_mpc %.4f, valid %s", self.angle_steers_des_mpc, plan_solution_valid)
 
     if LOG_MPC:
       dat = messaging.new_message()

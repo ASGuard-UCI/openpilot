@@ -7,6 +7,7 @@
 #include <eigen3/Eigen/Dense>
 #else
 #include <Eigen/Dense>
+// #include <eigen3/Eigen/Dense>
 #endif
 
 #include "common/timing.h"
@@ -21,14 +22,19 @@
 #define SELECTION 3 //output 3 group (lead now, in 2s and 6s)
 #define MDN_GROUP_SIZE 11
 #define SPEED_BUCKETS 100
+// For 0.6.6 model output
 #define OUTPUT_SIZE ((MODEL_PATH_DISTANCE*2) + (2*(MODEL_PATH_DISTANCE*2 + 1)) + MDN_GROUP_SIZE*LEAD_MDN_N + SELECTION)
+// For 0.7 model output
+#define OTHER_META_SIZE 4
+#define DESIRE_PRED_SIZE 32
+// #define OUTPUT_SIZE ((MODEL_PATH_DISTANCE*2) + (2*(MODEL_PATH_DISTANCE*2 + 1)) + MDN_GROUP_SIZE*LEAD_MDN_N + SELECTION + OTHER_META_SIZE + DESIRE_PRED_SIZE)
 #ifdef TEMPORAL
   #define TEMPORAL_SIZE 512
 #else
   #define TEMPORAL_SIZE 0
 #endif
 
-// #define DUMP_YUV
+#define DUMP_YUV
 
 Eigen::Matrix<float, MODEL_PATH_DISTANCE, POLYFIT_DEGREE - 1> vander;
 
@@ -56,6 +62,9 @@ void model_init(ModelState* s, cl_device_id device_id, cl_context context, int t
   }
 }
 
+bool once = true;
+int count = 0;
+
 ModelData model_eval_frame(ModelState* s, cl_command_queue q,
                            cl_mem yuv_cl, int width, int height,
                            mat3 transform, void* sock, float *desire_in) {
@@ -78,10 +87,16 @@ ModelData model_eval_frame(ModelState* s, cl_command_queue q,
   float *net_input_buf = model_input_prepare(&s->in, q, yuv_cl, width, height, transform);
 
   #ifdef DUMP_YUV
-    FILE *dump_yuv_file = fopen("/sdcard/dump.yuv", "wb");
+  if (once) {
+    count ++;
+    if (count == 95) {
+    FILE *dump_yuv_file = fopen("/home/junjies/openpilot_0.6.6/testdata/dump.yuv", "wb");
     fwrite(net_input_buf, MODEL_HEIGHT*MODEL_WIDTH*3/2, sizeof(float), dump_yuv_file);
     fclose(dump_yuv_file);
-    assert(1==2);
+    // assert(1==2);
+    once = false;
+    }
+  }
   #endif
 
   //printf("readinggggg \n");
@@ -111,9 +126,15 @@ ModelData model_eval_frame(ModelState* s, cl_command_queue q,
     model.right_lane.stds[i] = softplus(net_outputs.right_lane[MODEL_PATH_DISTANCE + i]);
   }
 
+  // 0.6.6
   model.path.std = softplus(net_outputs.path[MODEL_PATH_DISTANCE + MODEL_PATH_DISTANCE/4]);
   model.left_lane.std = softplus(net_outputs.left_lane[MODEL_PATH_DISTANCE + MODEL_PATH_DISTANCE/4]);
   model.right_lane.std = softplus(net_outputs.right_lane[MODEL_PATH_DISTANCE + MODEL_PATH_DISTANCE/4]);
+
+  // // 0.7
+  // model.path.std = softplus(net_outputs.path[MODEL_PATH_DISTANCE]);
+  // model.left_lane.std = softplus(net_outputs.left_lane[MODEL_PATH_DISTANCE]);
+  // model.right_lane.std = softplus(net_outputs.right_lane[MODEL_PATH_DISTANCE]);
 
   model.path.prob = 1.;
   model.left_lane.prob = sigmoid(net_outputs.left_lane[MODEL_PATH_DISTANCE*2]);
@@ -245,36 +266,43 @@ void fill_lead(cereal::ModelData::LeadData::Builder lead, const LeadData lead_da
   lead.setRelAStd(lead_data.rel_a_std);
 }
 
+void fill_transform(cereal::ModelData::ModelSettings::Builder settings, mat3 transform) {
+  settings.setInputTransform(transform.v);
+}
+
 void model_publish(PubSocket *sock, uint32_t frame_id,
-                   const ModelData data, uint64_t timestamp_eof) {
-        // make msg
-        capnp::MallocMessageBuilder msg;
-        cereal::Event::Builder event = msg.initRoot<cereal::Event>();
-        event.setLogMonoTime(nanos_since_boot());
+    const ModelData data, uint64_t timestamp_eof, mat3 transform) {
+  // make msg
+  capnp::MallocMessageBuilder msg;
+  cereal::Event::Builder event = msg.initRoot<cereal::Event>();
+  event.setLogMonoTime(nanos_since_boot());
 
-        auto framed = event.initModel();
-        framed.setFrameId(frame_id);
-        framed.setTimestampEof(timestamp_eof);
+  auto framed = event.initModel();
+  framed.setFrameId(frame_id);
+  framed.setTimestampEof(timestamp_eof);
 
-        kj::ArrayPtr<const float> speed(&data.speed[0], ARRAYSIZE(data.speed));
-        framed.setSpeed(speed);
-
-
-        auto lpath = framed.initPath();
-        fill_path(lpath, data.path);
-        auto left_lane = framed.initLeftLane();
-        fill_path(left_lane, data.left_lane);
-        auto right_lane = framed.initRightLane();
-        fill_path(right_lane, data.right_lane);
-
-        auto lead = framed.initLead();
-        fill_lead(lead, data.lead);
-        auto lead_future = framed.initLeadFuture();
-        fill_lead(lead_future, data.lead_future);
+  kj::ArrayPtr<const float> speed(&data.speed[0], ARRAYSIZE(data.speed));
+  framed.setSpeed(speed);
 
 
-        // send message
-        auto words = capnp::messageToFlatArray(msg);
-        auto bytes = words.asBytes();
-        sock->send((char*)bytes.begin(), bytes.size());
-      }
+  auto lpath = framed.initPath();
+  fill_path(lpath, data.path);
+  auto left_lane = framed.initLeftLane();
+  fill_path(left_lane, data.left_lane);
+  auto right_lane = framed.initRightLane();
+  fill_path(right_lane, data.right_lane);
+
+  auto lead = framed.initLead();
+  fill_lead(lead, data.lead);
+  auto lead_future = framed.initLeadFuture();
+  fill_lead(lead_future, data.lead_future);
+
+  // Junjie: piggy-back transform mat to model data
+  auto settings = framed.initSettings();
+  fill_transform(settings, transform);
+
+  // send message
+  auto words = capnp::messageToFlatArray(msg);
+  auto bytes = words.asBytes();
+  sock->send((char*)bytes.begin(), bytes.size());
+}

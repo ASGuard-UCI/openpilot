@@ -30,6 +30,7 @@ endif
 
 JSON_FLAGS = -I$(PHONELIBS)/json/src
 JSON11_FLAGS = -I$(PHONELIBS)/json11
+EIGEN_FLAGS = -I$(PHONELIBS)/eigen
 
 
 ifeq ($(ARCH),x86_64)
@@ -93,6 +94,7 @@ ubloxd_test: ubloxd_test.o $(OBJS) $(MESSAGING_LIBS)
            $(ZMQ_FLAGS) \
            $(MESSAGING_FLAGS) \
            $(JSON11_FLAGS) \
+           $(EIGEN_FLAGS) \
            $(JSON_FLAGS) \
            -I../ \
            -I../../ \
@@ -104,6 +106,7 @@ ubloxd_test: ubloxd_test.o $(OBJS) $(MESSAGING_LIBS)
           -Iinclude -I.. -I../.. \
           $(CEREAL_CFLAGS) \
           $(ZMQ_FLAGS) \
+          $(EIGEN_FLAGS) \
           $(JSON_FLAGS) \
           -c -o '$@' '$<'
 

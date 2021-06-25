@@ -1783,6 +1783,33 @@ struct KalmanOdometry {
   rotStd @3 :List(Float32); # std rad/s in device frame
 }
 
+# For LGSVL
+struct SimEvent {
+  framePath @0 :Text;
+  frameId @1 :Int32;
+  timestamp @2 :Float32;
+}
+
+struct CtrlEvent {
+  throttle @0 :Float32; # (0..1)
+  steering @1 :Float32; # (-1..1)
+  braking @2 :Float32; # (0..1)
+  reverse @3 :Bool; # default: False
+  handbrake @4 :Bool; # default: False
+  timestamp @5 :Float32;
+}
+
+struct SimState {
+  time @0 :Float32;
+  frameId @1 :Int32;
+  speed @2 :Float32;
+  steer @3 :Float32;
+  desiredSteer @4 :Float32;
+  position @5 :List(Float32);
+  velocity @6 :List(Float32);
+  attitude @7 :List(Float32);
+}
+
 struct Event {
   # in nanoseconds?
   logMonoTime @0 :UInt64;
@@ -1857,5 +1884,8 @@ struct Event {
     thumbnail @66: Thumbnail;
     carEvents @68: List(Car.CarEvent);
     carParams @69: Car.CarParams;
+    opToSim @70: CtrlEvent;
+    simToOp @71: SimEvent;
+    simState @72: SimState;
   }
 }

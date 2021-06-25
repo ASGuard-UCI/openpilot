@@ -2,7 +2,7 @@ import os
 from common.params import Params
 from common.basedir import BASEDIR
 from selfdrive.car.fingerprints import eliminate_incompatible_cars, all_known_cars
-from selfdrive.car.vin import get_vin, VIN_UNKNOWN
+# from selfdrive.car.vin import get_vin, VIN_UNKNOWN
 from selfdrive.swaglog import cloudlog
 import selfdrive.messaging as messaging
 from selfdrive.car import gen_empty_fingerprint
@@ -35,7 +35,8 @@ def _get_interface_names():
   # - keys are all the car names that which we have an interface for
   # - values are lists of spefic car models for a given car
   brand_names = {}
-  for car_folder in [x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]:
+  # for car_folder in [x[0] for x in os.walk(BASEDIR + '/selfdrive/car')]:
+  for car_folder in ['/selfdrive/car/mock']:
     try:
       brand_name = car_folder.split('/')[-1]
       model_names = __import__('selfdrive.car.%s.values' % brand_name, fromlist=['CAR']).CAR

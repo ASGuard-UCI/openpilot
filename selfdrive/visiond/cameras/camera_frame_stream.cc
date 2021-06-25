@@ -69,6 +69,8 @@ void run_frame_stream(DualCameraState *s) {
     cereal::Event::Reader event = cmsg.getRoot<cereal::Event>();
     auto frame = event.getFrame();
 
+    printf("Camera: frame id %d, img size %d\n", frame.getFrameId(), frame.getImage().size());
+
     const int buf_idx = tbuffer_select(tb);
     rear_camera->camera_bufs_metadata[buf_idx] = {
       .frame_id = frame.getFrameId(),
@@ -84,6 +86,7 @@ void run_frame_stream(DualCameraState *s) {
     void *yuv_buf = (void *)clEnqueueMapBuffer(q, yuv_cl, CL_TRUE,
                                                 CL_MAP_WRITE, 0, frame.getImage().size(),
                                                 0, NULL, &map_event, &err);
+
     assert(err == 0);
     clWaitForEvents(1, &map_event);
     clReleaseEvent(map_event);
