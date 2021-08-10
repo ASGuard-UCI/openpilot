@@ -19,10 +19,9 @@ class SimState:
 
 
 class SimControl:
-    def __init__(self, logger, frame_dir, sim_map="SingleLaneRoad_highway", vehicle="Jaguar XE 2015 2001 sl_highway", sim_vel=[0.0, 0.0, 20.0], time_of_day=12.0):
+    def __init__(self, logger, frame_dir, sim_map="sl_highway", vehicle="Jaguar XE 2015", sim_vel=[0.0, 0.0, 20.0], time_of_day=12.0):
         self.logger = logger
         self.sim = lgsvl.Simulator(os.environ.get("SIMULATOR_HOST", "127.0.0.1"), 8181)
-        # self.sim = lgsvl.Simulator("169.234.208.22", 8181)
 
         scene_name = sim_map
         if self.sim.current_scene == scene_name:
@@ -39,9 +38,6 @@ class SimControl:
         state = lgsvl.AgentState()
         state.transform = spawns[0]
         state.velocity = lgsvl.Vector(sim_vel[0], sim_vel[1], sim_vel[2])
-
-        # sim_speed = 0
-        # state.velocity = lgsvl.Vector(0, 0, 0)
 
         vehicle_name = vehicle
 
@@ -78,23 +74,6 @@ class SimControl:
 
         self.ego.apply_control(self.ctrl, True)
 
-        if False:
-            # Spawn front NPC
-            forward = lgsvl.utils.transform_to_forward(spawns[0])  # forward unit vector
-            right = lgsvl.utils.transform_to_right(spawns[0])  # right unit vector
-            state = lgsvl.AgentState()
-            lateral_shift = 0
-            # forward_shift = 58.0  # 2-sec safe distance: highway
-            # forward_shift = 40.0  # 2-sec safe distance: local
-            forward_shift = 87.0  # 3-sec safe distance: highway
-            # forward_shift = 60.0  # 3-sec safe distance: local
-            state.transform.position = spawns[0].position + lateral_shift * right + forward_shift * forward
-            state.transform.rotation = spawns[0].rotation
-            npc_front = self.sim.add_agent("Sedan", lgsvl.AgentType.NPC, state)
-            npc_front.follow_closest_lane(True, 29)  # highway
-            # npc_front.follow_closest_lane(True, 20)  # local
-
-
         if False:  # disabled for highway scenario
             # NPC spawn position (comment out if highway)
             forward = lgsvl.utils.transform_to_forward(spawns[0])  # forward unit vector
@@ -102,12 +81,10 @@ class SimControl:
             state = lgsvl.AgentState()
             lateral_shift = -2.7
             forward_shift = 274.0
-            # forward_shift = 100.0
             state.transform.position = spawns[0].position + lateral_shift * right + forward_shift * forward
             state.transform.rotation = spawns[0].rotation
             state.transform.rotation.y = spawns[0].rotation.y + 180.0
             npc = self.sim.add_agent("BoxTruck", lgsvl.AgentType.NPC, state)
-            #npc = self.sim.add_agent("Jeep", lgsvl.AgentType.NPC, state)
             # NPC follows lane
             npc.follow_closest_lane(True, 20)
 
@@ -137,12 +114,11 @@ class SimControl:
 
     def next_yuv_frame(self):
         framePath = os.path.join(self.frame_dir, "frame_" + str(self.frame_id) + ".png")
-        self.main_cam.save(framePath, compression=0)
+        self.main_cam.save(framePath, compression=3)
         freeFramePath = os.path.join(self.frame_dir, "free_frame_" + str(self.frame_id) + ".png")
-        # self.free_cam.save(freeFramePath, compression=0)
+        self.free_cam.save(freeFramePath, compression=3)
         bgr_img_raw = cv2.imread(framePath)
         bgr_img = cv2.resize(bgr_img_raw[200:-200,200:-200], (1164,874))
-        # bgr_img = cv2.resize(bgr_img_raw[400:-400,400:-400], (1164,874))
         yuv_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2YUV_I420)
         ret_frame_id = self.frame_id
         self.frame_id += 1

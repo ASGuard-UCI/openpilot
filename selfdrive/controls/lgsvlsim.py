@@ -164,7 +164,6 @@ def control_thread(frame_dir, sim_map, vehicle, sim_vel, time_of_day):
         last_angle = apply_angle
 
         sim_state = sim.apply_control(apply_angle_ratio)
-        # sim_state = sim.apply_control(-9.0/300)
 
         curr_speed = sim_state.speed
         curr_steer_angle = -sim_state.wheel_ratio * ANGLE_MAX_V[0]

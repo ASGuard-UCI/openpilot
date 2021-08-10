@@ -62,7 +62,7 @@
 - Set to use the correct vanishing point coordinate based on the scenario
   - Checkout line 39--45 in ``./selfdrive/locationd/calibrationd.py``
 - Enable the NPC truck if simulating the local road scenario
-  - Checkout line 98--112 in ``selfdrive/controls/simcontrol.py``
+  - Checkout line 77--89 in ``selfdrive/controls/simcontrol.py``
 
 ## 4. Place your patch
 - Place the patch image to the corresponding simulator folder based on your need
