@@ -65,7 +65,6 @@
   - Checkout line 98--112 in ``selfdrive/controls/simcontrol.py``
 
 ## 4. Place your patch
-- Enable the pipenv environemnt if you haven't: ``pipenv shell``
 - Place the patch image to the corresponding simulator folder based on your need
   - For local road simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_local/simulator_Data/Resources/patch.png``
   - For highway simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_highway/simulator_Data/Resources/patch.png``
@@ -75,6 +74,7 @@
 - Double click to execute the simulator: ``./drp_attack_utils/simulator-sl_{local or highway}/simulator``
 - Click "Open Browser"
 - Start the "Python API" simulation in the browser
+- Enable the pipenv environemnt if you haven't: ``pipenv shell``
 - Run the simulation: ``python ./start_sim.py``
   - It is possible that the openpilot will need to compile lateral/longitudinal controllers in your first run. Just be patient and wait for the compilation ends.
   - If necessary, kill the simulation after compilation finishes and re-run ``python ./start_sim.py``.
