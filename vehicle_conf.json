@@ -1,0 +1,71 @@
+[
+  {
+    "type": "GPS Odometry",
+    "name": "GPS Odometry",
+    "params": {
+      "Frequency": 12.5,
+      "Topic": "/apollo/sensor/gnss/odometry",
+      "Frame": "gps"
+    },
+    "transform": {
+      "x": 0,
+      "y": 0,
+      "z": -1.348649,
+      "pitch": 0,
+      "yaw": 0,
+      "roll": 0
+    }
+  },
+  {
+    "type": "Color Camera",
+    "name": "Main Camera",
+    "params": {
+      "Width": 2146,
+      "Height": 1711,
+      "Frequency": 20,
+      "JpegQuality": 100,
+      "FieldOfView": 40,
+      "MinDistance": 0.1,
+      "MaxDistance": 1000,
+      "Topic": "/apollo/sensor/camera/front_6mm/image/compressed"
+    },
+    "transform": {
+      "x": 0,
+      "y": 1.35,
+      "z": 0.25,
+      "pitch": 2,
+      "yaw": 0,
+      "roll": 0
+    }
+  },
+  {
+    "type": "Color Camera",
+    "name": "Free Camera",
+    "params": {
+      "Width": 2146,
+      "Height": 1711,
+      "Frequency": 20,
+      "JpegQuality": 100,
+      "FieldOfView": 40,
+      "MinDistance": 0.1,
+      "MaxDistance": 1000,
+      "Topic": "/apollo/sensor/camera/front_6mm/image/compressed_free"
+    },
+    "transform": {
+      "x": 0.0,
+      "y": 2.5,
+      "z": -8.00,
+      "pitch": 5,
+      "yaw": 0,
+      "roll": 0
+    }
+  },
+  {
+    "type": "Keyboard Control",
+    "name": "Keyboard Car Control"
+  },
+  {
+    "type": "Wheel Control",
+    "name": "Wheel Car Control"
+  }
+]

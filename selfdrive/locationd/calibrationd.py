@@ -37,24 +37,12 @@ class Calibrator():
     self.vp = copy.copy(VP_INIT)
     self.vps = []
     # sl_highway v0.6.6
-    self.vp = np.array([584, 383])
-    self.vps = [self.vp] * INPUTS_WANTED
+    # self.vp = np.array([584, 383])
+    # self.vps = [self.vp] * INPUTS_WANTED
 
     # sl_local v0.6.6
-    # self.vp = np.array([578, 388])
-    # self.vps = [self.vp] * INPUTS_WANTED
-
-    # # sl_highway v0.7
-    # self.vp = np.array([588.1871978223745, 385.61302930859745])
-    # self.vps = [self.vp] * INPUTS_WANTED
-
-    # # sl_local v0.7
-    # self.vp = np.array([580.5880982918998, 389.04574904852205])
-    # self.vps = [self.vp] * INPUTS_WANTED
-
-    # # sf_local v0.7
-    # self.vp = np.array([582.14950496, 388.2476068])
-    # self.vps = [self.vp] * INPUTS_WANTED
+    self.vp = np.array([578, 388])
+    self.vps = [self.vp] * INPUTS_WANTED
 
     self.vp_static = self.vp
 

@@ -248,7 +248,6 @@ def manager_thread():
             np.save(state_dir + '/state_' + str(sm['model'].frameId), sim_state)
 
         if frame_id > 250:
-        #if frame_id > 150:
             # Terminate the simulation
             raise
 

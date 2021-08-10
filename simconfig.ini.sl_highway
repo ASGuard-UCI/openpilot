@@ -2,9 +2,9 @@
   dir={full_path_to_dir_to_store_simulation_results}/data
 
 [scenario]
-  map=sl_local
+  map=sl_highway
   time_of_day=12
   vehicle=Jaguar XE 2015
   velocity_x=0.0
   velocity_y=0.0
-  velocity_z=20.0
+  velocity_z=29.0
