@@ -54,14 +54,7 @@
   - ``cd ../selfdrive/messaging/; make clean; make``
   - ``cd ../visiond/; make clean; make``
 
-## 3. Place your patch and run simulation
-- Enable the pipenv environemnt if you haven't: ``pipenv shell``
-- Place the patch image to the corresponding simulator folder based on your need
-  - For local road simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_local/simulator_Data/Resources/patch.png``
-  - For highway simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_highway/simulator_Data/Resources/patch.png``
-  - Note: the above paths already contain the patch files used in our paper
-
-## 4. Simulation scenario configuration
+## 3. Simulation scenario configuration
 - Copy config file for the scenario (i.e., local or highway)
   - For highway simulation: ``cp simconfig.ini.sl_highway simconfig.ini``
   - For local road simulation: ``cp simconfig.ini.sl_local simconfig.ini``
@@ -70,6 +63,13 @@
   - Checkout line 39--45 in ``./selfdrive/locationd/calibrationd.py``
 - Enable the NPC truck if simulating the local road scenario
   - Checkout line 98--112 in ``selfdrive/controls/simcontrol.py``
+
+## 4. Place your patch
+- Enable the pipenv environemnt if you haven't: ``pipenv shell``
+- Place the patch image to the corresponding simulator folder based on your need
+  - For local road simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_local/simulator_Data/Resources/patch.png``
+  - For highway simulation: ``cp {your_patch_name}.png ./drp_attack_utils/simulator-sl_highway/simulator_Data/Resources/patch.png``
+  - Note: the above paths already contain the patch files used in our paper
 
 ## 5. Run simulation!
 - Double click to execute the simulator: ``./drp_attack_utils/simulator-sl_{local or highway}/simulator``
