@@ -37,7 +37,7 @@
   - Map bundle path: ``{openpilot path}/drp_attack_utils/simulator-sl_highway/AssetBundles/environment_SingleLaneRoad``
   - Note: make sure to use **full path**
 - Vehicle: set vehicle name as **Jaguar XE 2015**
-  - Vehicle URL: ``https://assets.lgsvlsimulator.com/4eb6f2f8c293b00c4fed413a844cf3e4ffe7015d/vehicle_Jaguar2015XE``
+  - Vehicle URL: ``https://assets.lgsvlsimulator.com/5797dab8650131e7b9518c5207d4515fe75b2cbf/vehicle_Jaguar2015XE``
   - Sensor conf: ``vehicle_conf.json``
 - Close the simulator
 
@@ -80,3 +80,8 @@
   - If necessary, kill the simulation after compilation finishes and re-run ``python ./start_sim.py``.
 - After the simulation ends, you can generate simulation video using: ``ffmpeg -r 20 -i {your log dir}/frames/free_frame_%d.png -vcodec libx264 -pix_fmt yuv420p {your log dir}/sim_view.mp4 -y``
   - Note: make sure to use the correct log directory
+
+## Troubleshooting
+- Cannot load visiond module with error: "beignet-opencl-icd: no supported GPU found, this is probably the wrong opencl-icd package for this hardware (If you have multiple ICDs installed and OpenCL works, you can ignore this message) visiond: visiond.cc:251: void (anonymous namespace)::cl_init((anonymous namespace)::VisionState \*): Assertion `err == 0' failed."
+  - Solution: Use the following command to install OpenCL if your GPU is from Nvidia: ``sudo apt install nvidia-opencl-icd ocl-icd-libopencl1 clinfo``
+  - Note: May need to uninstall ``beignet-opencl-icd`` before executing the above: ``sudo apt remove beignet-opencl-icd``
